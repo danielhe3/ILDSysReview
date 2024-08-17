@@ -1,0 +1,16 @@
+,title,geo_accession,source,diagnosis,age,sex,smoking,location,predSex
+GSM2700624,F-1-5_2,GSM2700624,lung,IPF,67,Male,yes,Hiroshima JPN,Male
+GSM2700625,F-4-3,GSM2700625,lung,IPF,78,Male,yes,Hiroshima JPN,Male
+GSM2700626,F-13-2,GSM2700626,lung,IPF,62,Male,yes,Hiroshima JPN,Male
+GSM2700627,F-30-2,GSM2700627,lung,IPF,76,Male,yes,Hiroshima JPN,Male
+GSM2700628,control-1,GSM2700628,lung,Control,NA,NA,NA,Hiroshima JPN,mixed
+GSM2700629,F-7-2_3,GSM2700629,lung,IPF,73,Male,yes,Hiroshima JPN,Male
+GSM2700630,F41,GSM2700630,lung,IPF,69,Male,yes,Hiroshima JPN,Male
+GSM2700631,F40,GSM2700631,lung,IPF,60,Male,yes,Hiroshima JPN,Male
+GSM2700632,F-24-3_2,GSM2700632,lung,NSIP,61,Female,no,Hiroshima JPN,Female
+GSM2700633,control-2,GSM2700633,lung,Control,NA,NA,NA,Hiroshima JPN,mixed
+GSM2700634,F12-2,GSM2700634,lung,NSIP,68,Male,yes,Hiroshima JPN,Male
+GSM2700635,F-35-2_2,GSM2700635,lung,NSIP,58,Female,no,Hiroshima JPN,Female
+GSM2700636,F-39-3,GSM2700636,lung,NSIP,59,Male,yes,Hiroshima JPN,Male
+GSM2700637,F-26-3_2,GSM2700637,lung,NSIP,70,Female,no,Hiroshima JPN,Female
+GSM2700638,control-3,GSM2700638,lung,Control,NA,NA,NA,Hiroshima JPN,mixed

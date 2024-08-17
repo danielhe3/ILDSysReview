@@ -1,0 +1,7 @@
+"","title","geo_accession","source","diagnosis","macroscopic_appearance","Subject","location","age","sex","race","predSex"
+"1","HC11","GSM2648740","lung","Control","normal","HC1","Baltimore USA",29,"Male","White","Male"
+"2","HC21","GSM2648742","lung","Control","normal","HC2","Baltimore USA",37,"Male","White","Male"
+"3","HC31","GSM2648745","lung","Control","normal","HC3","Baltimore USA",21,"Male","White","Male"
+"4","IPF1s1","GSM2648758","lung","IPF","scarred","IPF1","Baltimore USA",70,"Male","White","Male"
+"5","IPF2s1","GSM2648761","lung","IPF","scarred","IPF2","Baltimore USA",74,"Male","White","Male"
+"6","IPF3s1","GSM2648765","lung","IPF","scarred","IPF3","Baltimore USA",68,"Male","White","Male"

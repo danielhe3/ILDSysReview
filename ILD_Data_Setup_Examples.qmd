@@ -1,0 +1,256 @@
+---
+title: "ILD Data Setup"
+format: html
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+librarian::shelf(tidyverse,dplyr,mixOmics,stringr,devtools,biomaRt, sva)
+set.seed(91)
+```
+
+# Data Import
+
+The following datasets were obtained from the NCBI Gene Expression Omnibus. The column headers are:
+
+- geo_accession: individual sample accession number on NCBI or SRA
+- title: author-provided title 
+- source: sample origin (i.e. blood, lung)
+- sex: reported sex
+- predSex: predicted sex based on expression of 1 female-specific gene (XIST) and 4 male-specific genes (RPS4Y1, EIF1AY, DDX3Y, KDM5D) 
+- diagnosis: reported diagnosis
+- age: reported age
+- FVC: reported forced vital capacity, percent predicted
+- DLCO: reported diffusing capacity of the lung for carbon monoxide, percent predicted
+- study: GEO or SRA dataset accession number
+
+```{r import}
+# Importing the associated metadata from each dataset
+ILD_meta <- readRDS(paste0(getwd(),"/datasets/RDS/ILD_meta.RDS"))
+meta_ILD <- map_dfr(ILD_meta, bind_rows)
+meta_ILD <- meta_ILD[order(meta_ILD$geo_accession), ] # sorting by geo accession
+head(meta_ILD)
+```
+
+Datasets collected were normalized by authors and uploaded to GEO, or  
+
+```{r}
+# Importing a named list of each expression matrix
+ILD_df <- c(
+  readRDS(paste0(getwd(),"/datasets/RDS/ILD_df_part1.RDS")),
+  readRDS(paste0(getwd(),"/datasets/RDS/ILD_df_part2.RDS")),
+  readRDS(paste0(getwd(),"/datasets/RDS/ILD_df_part3.RDS")),
+  readRDS(paste0(getwd(),"/datasets/RDS/ILD_df_part4.RDS")),
+  "GSE150910" = list(rbind(
+    readRDS(paste0(getwd(),"/datasets/RDS/ILD_df_part5.1.RDS")),
+    readRDS(paste0(getwd(),"/datasets/RDS/ILD_df_part5.2.RDS"))
+  ))
+)
+```
+
+# Data sequestering 
+
+Helpful functions for data sequestering:
+
+```{r}
+# A function to concatenate dataframes in a list based on shared genes; requires genes to be stored in a column titled "ensembl_gene_id"
+concatenate_df <- function(df_list, percent_shared){
+  all_genes <- purrr::map(df_list, ~dplyr::pull(.x, ensembl_gene_id)) %>% unlist() # obtaining common genes
+  gene_frequency_df <- data.frame(Gene = names(table(all_genes)), Frequency = as.numeric(table(all_genes)), Percentage = as.numeric(table(all_genes))/length(df_list)) # creating a df with gene frequencies
+  common_genes <- gene_frequency_df %>% filter(Percentage>=percent_shared) %>% pull(Gene) # obtaining genes expressed in desired percentage of dataframes
+  df_list <- purrr::map(df_list, ~filter(.x, ensembl_gene_id %in% common_genes)) # filtering each dataframe to only have common genes
+  df_list <- df_list %>% purrr::reduce(left_join, by="ensembl_gene_id") # concatenating all dataframes
+  return(df_list)
+}
+
+# Testing whether an expression matrix matches the order of the metadata
+test_match_order <- function(x,y) {
+  if (all(x==y)) print('Same values, same order.')
+  if (!all(x==y) && all(sort(x)==sort(y))) print('Same values, wrong order.')
+  if (!all(x==y) && !all(sort(x)==sort(y))) print('No match.')
+}
+```
+
+## For unsupervised analysis
+
+To perform unsupervised analysis, we subset the expression matrices to have shared predictors across all datasets in order to perform ComBat batch correction. However, other batch correction methods that can handle missing data are likely useful as well. 
+
+```{r}
+# reducing list of dataframes to a single dataframe with all samples
+df_ILD <- concatenate_df(df_list = ILD_df, percent_shared = 1.0)
+head(df_ILD)[1:5,1:5]
+# creating ILD column as listed in the metadata
+ILD_subtypes <- c("AIP","COP","CPFE","CTD-ILD","DIP","FU","HP","IPF","Mixed IPF-NSIP","NSIP", "RA_ILD", "RB-ILD", "SSc-ILD","UF","Scleroderma", "IPF-AEx")
+# creating a column for ease of subsetting ILD, COPD, Control samples
+meta_ILD <- meta_ILD %>%
+  mutate(ILD = case_when(
+    diagnosis %in% ILD_subtypes ~ "ILD",
+    diagnosis %in% c("Ref", "Control") ~ "Control",
+    diagnosis == "COPD" ~ "COPD",
+    .default = NA) )
+meta_ILD_unsupervised <- meta_ILD %>% filter(ILD %in% c("ILD", "COPD", "Control"))
+
+# combat requires no NA values and the dimensions to be probe x sample
+df_ILD <- df_ILD %>% column_to_rownames("ensembl_gene_id")
+df_ILD_unsupervised <- df_ILD[,which(colnames(df_ILD) %in% meta_ILD_unsupervised$geo_accession)]
+# testing order
+test_match_order(colnames(df_ILD_unsupervised), meta_ILD_unsupervised$geo_accession)
+# modifying order
+df_ILD_unsupervised <- df_ILD_unsupervised[,match(meta_ILD_unsupervised$geo_accession, colnames(df_ILD_unsupervised)) ]
+test_match_order(colnames(df_ILD_unsupervised),meta_ILD_unsupervised$geo_accession) # order matches!
+
+X_combat = ComBat(dat=df_ILD_unsupervised, batch=meta_ILD_unsupervised$study, mod=NULL, par.prior=TRUE, prior.plots=FALSE)
+
+z_score <- function(x, margin = 2) {
+  z_fun <- function(y) {
+    (y - mean(y, na.rm = TRUE)) / sd(y, na.rm = TRUE)
+  }
+  
+  if (margin == 2) {
+    return(apply(x, margin, z_fun))
+  } else if (margin == 1) {
+    return(t(apply(x, margin, z_fun)))
+  }
+}
+
+data_matrix <- z_score(X_combat,1) # can check that sd of the genes/rows = 1
+#write.csv(data_matrix, paste0(getwd(),"/datasets/ControlILDCOPD_combat_df.csv"), row.names=TRUE) # run to obtain combat-corrected matrix
+```
+
+## For MINT modeling
+
+To obtain all data for a specific comparison, we subset the dataframes containing diagnoses of interest. For example, if we want to perform a comparison between HP and Control Samples, we do the following:
+
+```{r}
+# obtaining studies containing HP and Control Samples
+HPControl_studies <- intersect(
+  unique(meta_ILD$study[meta_ILD$diagnosis=="HP"]),
+  unique(meta_ILD$study[meta_ILD$diagnosis=="Control"])
+)
+HP_meta <- meta_ILD %>% filter(study %in% HPControl_studies) %>% filter(diagnosis %in% c("HP", "Control"))
+
+# obtaining HP expression matrices
+HP_df <- ILD_df[which(names(ILD_df) %in% HPControl_studies)]
+df_HP <- concatenate_df(df_list = HP_df, percent_shared = 0.80)
+df_HP <- df_HP %>% column_to_rownames("ensembl_gene_id") %>% t()%>% as.data.frame() %>% rownames_to_column("sample") %>% filter(sample %in% HP_meta$geo_accession) %>% column_to_rownames("sample") # subsetting only HP and Control Samples
+
+# Testing the order 
+test_match_order(rownames(df_HP),HP_meta$geo_accession)
+# order doesn't match, so we will re-arrange 
+df_HP <- df_HP[match(HP_meta$geo_accession, rownames(df_HP)), ]
+test_match_order(rownames(df_HP),HP_meta$geo_accession) # order matches!
+
+# To make it easier to perform MINT modeling, we store the data in a single object. The dataframe must have samples in rows and genes in columns.
+HP <- list()
+HP$gene <- as.matrix(df_HP)
+HP$study <- as.factor(HP_meta$study)
+HP$diagnosis <- factor(HP_meta$diagnosis, levels=c("HP", "Control")) %>% droplevels()
+```
+
+# MINT
+
+```{r}
+# expression matrix
+X = HP$gene
+dim(X) 
+
+# the outcome vector Y:  
+Y = HP$diagnosis 
+length(Y) 
+summary(Y)
+
+# vector indicating each independent study
+study = HP$study
+# number of samples per study:
+summary(study)
+# experimental design
+table(Y,study)
+```
+
+## Tuning
+
+First, we must perform model tuning to determine the optimal number of features.
+
+```{r}
+# defining test sets used in the study
+test_sets <- c("GSE47460-GPL6480", "GSE53845", "GSE92592", "GSE73189", "GSE110147", "GSE184316", "GSE213001","GSE166036")
+
+ind.test = which(study %in% c(test_sets))
+
+if(file.exists(paste0(getwd(),"/tuning/HP_tuning.RDS"))){
+  tune.mint <- readRDS(paste0(getwd(),"/tuning/HP_tuning.RDS"))
+} else{
+  # note: this can take a long time to run with more datasets
+  tune.mint = tune(X = X[-ind.test,], 
+                   Y = Y[-ind.test], 
+                   study = study[-ind.test] %>% droplevels(),
+                   ncomp = 2,
+                   test.keepX = seq(1,1000,1), # tuning over 1000 possible features
+                   method="mint.splsda", 
+                   dist = "max.dist", 
+                   progressBar = TRUE)
+}
+
+tune.mint$choice.ncomp # number of components (note: must always be minimum 2)
+tune.mint$choice.keepX # optimal number of features
+plot(tune.mint, col = color.jet(2), sd=FALSE)
+head(tune.mint[["error.rate"]][order(tune.mint[["error.rate"]][,1]),], n=10) # visualizing the top 10 number of features sorted by lowest BER
+```
+
+## Model
+
+We then create a model using the optimal number of features.
+
+```{r}
+if(file.exists(paste0(getwd(),"/models/HP_model.RDS"))){
+  mint.splsda.res <- readRDS(paste0(getwd(),"/models/HP_model.RDS"))
+} else{
+  mint.splsda.res = mint.splsda(X = X[-c(ind.test),], Y = Y[-c(ind.test)], study = study[-c(ind.test)] %>% droplevels(), ncomp = 2, keepX = tune.mint$choice.keepX)
+}
+model <- plotIndiv(mint.splsda.res, study = 'global', legend = TRUE, title = 'MINT sPLS-DA', 
+          subtitle = 'Global', ellipse=T) 
+```
+
+## Model Features
+
+```{r}
+splsdaVar1 <- selectVar(mint.splsda.res, comp = 1) %>% as.data.frame()
+#acquiring gene names:
+ensembl <- useEnsembl(biomart = "ensembl", 
+                   dataset = "hsapiens_gene_ensembl", 
+                   mirror = "uswest")
+filters = listFilters(ensembl)
+gene_key1 <- getBM(attributes=c('ensembl_gene_id','hgnc_symbol'), 
+      filters = c("ensembl_gene_id"), 
+      values = splsdaVar1$name, 
+      mart = ensembl)
+#attaching gene names
+splsdaVar1 <- splsdaVar1 %>% mutate(ensembl_gene_id=name) %>% left_join(gene_key1, by="ensembl_gene_id")
+
+write.csv(splsdaVar1, paste0(getwd(),"/model_genes/HP_genes.csv"))
+```
+
+## Model Validation
+
+
+```{r}
+ind.test = which(study %in% test_sets)
+gene.test = HP$gene[ind.test,]
+Y.test = HP$diagnosis[ind.test]
+study.test = factor(HP$study[ind.test])
+
+pred = predict(mint.splsda.res, newdata = gene.test, study.test = study.test)
+data.frame(Truth = Y.test, prediction = pred$class$max.dist)
+predictions <- data.frame(Truth = Y.test, prediction = pred$class$max.dist)
+#confusion matrix on component 1
+confusion.mat <- get.confusion_matrix(truth = Y.test, predicted = pred$class$max.dist[,1])
+
+test.result <- auroc(mint.splsda.res, newdata=gene.test, outcome.test=Y.test, study.test=study.test, roc.comp=1)
+
+get.BER(confusion.mat)
+#sensitivity = TP/TP+FN
+confusion.mat[1,1]/(confusion.mat[1,1]+confusion.mat[1,2])
+#specificity = TN/TN+FP
+confusion.mat[2,2]/(confusion.mat[2,2]+confusion.mat[2,1])
+```
+
